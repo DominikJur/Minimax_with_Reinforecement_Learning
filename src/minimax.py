@@ -340,15 +340,14 @@ class MinimaxBot:
             return
         
         print(f"Training DQN for {episodes} episodes...")
-        
+        print(f"Training on device: {self.dqn_agent.device}")
         for episode in tqdm(range(episodes), desc="Training DQN"):
             self.board.reset()
             current_player = 1
             episode_states = []
             game_length = 0
-            max_game_length = 50
             
-            while not self.board.is_terminal() and game_length < max_game_length:
+            while not self.board.is_terminal():
                 state = self.board_to_state()
                 valid_moves = self.board.get_valid_moves()
                 

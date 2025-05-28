@@ -24,7 +24,7 @@ def train_new_bot():
     )
     
     print("Starting training...")
-    bot.train_dqn(episodes=300, save_interval=50)
+    bot.train_dqn(episodes=3000, save_interval=50)
     
     print("Training completed! Testing bot...")
     test_bot_performance(bot)

@@ -11,17 +11,14 @@ import os
 from src.board import GameBoard
 from tqdm import tqdm
 
-# DQN Network (same as before)
+# Simplified DQN Network for faster training
 class DQNNetwork(nn.Module):
-    def __init__(self, input_size=25, hidden_size=512, output_size=1):
+    def __init__(self, input_size=25, hidden_size=256, output_size=1):
         super(DQNNetwork, self).__init__()
         self.network = nn.Sequential(
             nn.Linear(input_size, hidden_size),
             nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            nn.Dropout(0.2),
+            nn.Dropout(0.1),  # Reduced dropout
             nn.Linear(hidden_size, hidden_size//2),
             nn.ReLU(),
             nn.Linear(hidden_size//2, output_size),
@@ -32,8 +29,8 @@ class DQNNetwork(nn.Module):
         return self.network(x)
 
 class DQNAgent:
-    def __init__(self, state_size=25, lr=0.0005, gamma=0.95, epsilon=1.0, 
-                 epsilon_min=0.01, epsilon_decay=0.995, memory_size=100000):
+    def __init__(self, state_size=25, lr=0.001, gamma=0.95, epsilon=1.0, 
+                 epsilon_min=0.01, epsilon_decay=0.995, memory_size=50000):  # Reduced memory
         self.state_size = state_size
         self.lr = lr
         self.gamma = gamma
@@ -64,7 +61,7 @@ class DQNAgent:
             value = self.q_network(state)
         return value.item()
     
-    def replay(self, batch_size=64):
+    def replay(self, batch_size=32):  # Reduced batch size for faster training
         if len(self.memory) < batch_size:
             return 0.0
         
@@ -122,9 +119,14 @@ class MinimaxBot:
         self.player = player
         self.opponent = 3 - player
         self.max_depth = max_depth
+        self.training_depth = max(1, max_depth - 2)  # Use shallower depth during training
         self.board = GameBoard()
         self.use_dqn = use_dqn
         self.model_path = model_path
+        self.is_training = False  # Flag to track training mode
+        
+        # Move ordering for better pruning
+        self.center_moves = [33, 32, 34, 23, 43, 22, 24, 42, 44]
         
         # Initialize DQN if requested
         if self.use_dqn:
@@ -150,10 +152,22 @@ class MinimaxBot:
                     state.append(0.0)
         return np.array(state, dtype=np.float32)
 
+    def order_moves(self, moves: List[int]) -> List[int]:
+        """Order moves for better alpha-beta pruning"""
+        # Prioritize center moves
+        center_first = []
+        others = []
+        
+        for move in moves:
+            if move in self.center_moves:
+                center_first.append(move)
+            else:
+                others.append(move)
+        
+        return center_first + others
+
     def evaluate_position(self, player: int) -> float:
-        """
-        Enhanced evaluation function - uses DQN if available, falls back to heuristics
-        """
+        """Enhanced evaluation function - uses DQN if available, falls back to heuristics"""
         # Check terminal states first
         result = self.board.get_game_result(player)
         if result is not None:
@@ -184,17 +198,25 @@ class MinimaxBot:
         return self._evaluate_patterns(player)
 
     def _evaluate_patterns(self, player: int) -> float:
-        """Original heuristic evaluation (your existing code)"""
+        """Original heuristic evaluation - optimized version"""
         score = 0
+        
+        # Cache board lookups
+        board = self.board.board
+        opponent = 3 - player
 
+        # Optimized pattern evaluation
         for pattern in self.board.win_patterns:
-            player_count = sum(
-                1 for r, c in pattern if self.board.board[r][c] == player
-            )
-            opponent_count = sum(
-                1 for r, c in pattern if self.board.board[r][c] == self.opponent
-            )
-
+            player_count = 0
+            opponent_count = 0
+            
+            for r, c in pattern:
+                cell = board[r][c]
+                if cell == player:
+                    player_count += 1
+                elif cell == opponent:
+                    opponent_count += 1
+            
             if opponent_count == 0:
                 if player_count == 3:
                     score += 100
@@ -202,8 +224,7 @@ class MinimaxBot:
                     score += 10
                 elif player_count == 1:
                     score += 1
-
-            if player_count == 0:
+            elif player_count == 0:
                 if opponent_count == 3:
                     score -= 100
                 elif opponent_count == 2:
@@ -212,35 +233,40 @@ class MinimaxBot:
                     score -= 1
 
         for pattern in self.board.lose_patterns:
-            player_count = sum(
-                1 for r, c in pattern if self.board.board[r][c] == player
-            )
-            opponent_count = sum(
-                1 for r, c in pattern if self.board.board[r][c] == self.opponent
-            )
+            player_count = 0
+            opponent_count = 0
+            
+            for r, c in pattern:
+                cell = board[r][c]
+                if cell == player:
+                    player_count += 1
+                elif cell == opponent:
+                    opponent_count += 1
 
-            if player_count == 2 and opponent_count == 0:
-                score -= 50
-            elif player_count == 1 and opponent_count == 0:
-                score -= 5
-
-            if opponent_count == 2 and player_count == 0:
-                score += 50
-            elif opponent_count == 1 and player_count == 0:
-                score += 5
+            if opponent_count == 0:
+                if player_count == 2:
+                    score -= 50
+                elif player_count == 1:
+                    score -= 5
+            elif player_count == 0:
+                if opponent_count == 2:
+                    score += 50
+                elif opponent_count == 1:
+                    score += 5
 
         return score
 
     def minimax(self, depth: int, alpha: float, beta: float, maximizing: bool) -> Tuple[float, Optional[int]]:
-        """Minimax algorithm (your existing implementation)"""
+        """Optimized minimax algorithm"""
         if depth == 0 or self.board.is_terminal():
             return self.evaluate_position(self.player), None
 
         current_player = self.player if maximizing else self.opponent
         opponent_player = self.opponent if maximizing else self.player
-        moves = self.board.get_valid_moves()
+        moves = self.order_moves(self.board.get_valid_moves())  # Order moves for better pruning
         best_move = None
 
+        # Early game optimization
         if self.board.is_empty():
             return None, 33 
             
@@ -256,14 +282,17 @@ class MinimaxBot:
             for move in moves:
                 self.board.set_move(move, current_player)
 
+                # Check for immediate win
                 if depth == self.max_depth and self.board.check_win(current_player):
                     self.board.undo_move(move)
                     return None, move
 
+                # Skip losing moves
                 if self.board.check_lose(current_player):
                     self.board.undo_move(move)
                     continue
 
+                # Check for defensive moves
                 if depth == self.max_depth:
                     self.board.undo_move(move)
                     self.board.set_move(move, opponent_player)
@@ -282,7 +311,7 @@ class MinimaxBot:
 
                 alpha = max(alpha, eval_score)
                 if beta <= alpha:
-                    break
+                    break  # Alpha-beta pruning
 
             return max_eval, best_move
 
@@ -291,14 +320,18 @@ class MinimaxBot:
             
             for move in moves:
                 self.board.set_move(move, current_player)
+                
+                # Check for immediate win
                 if depth == self.max_depth and self.board.check_win(current_player):
                     self.board.undo_move(move)
                     return None, move
 
+                # Skip losing moves
                 if self.board.check_lose(current_player):
                     self.board.undo_move(move)
                     continue
 
+                # Check for defensive moves
                 if depth == self.max_depth:
                     self.board.undo_move(move)
                     self.board.set_move(move, opponent_player)
@@ -317,55 +350,112 @@ class MinimaxBot:
 
                 beta = min(beta, eval_score)
                 if beta <= alpha:
-                    break
+                    break  # Alpha-beta pruning
 
             return min_eval, best_move
 
-    def get_best_move(self) -> int:
+    def get_best_move(self, training_mode=False) -> int:
         """Get the best move using minimax algorithm"""
-        _, best_move = self.minimax(self.max_depth, float("-inf"), float("inf"), True)
+        # Use different depth for training vs playing
+        depth = self.training_depth if training_mode else self.max_depth
+        
+        _, best_move = self.minimax(depth, float("-inf"), float("inf"), True)
 
         if best_move is None:
             valid_moves = self.board.get_valid_moves()
             best_move = valid_moves[0]
         
-        time.sleep(1)  # Simulate thinking time
+        # Only add delay when actually playing, not during training
+        if not training_mode and not self.is_training:
+            time.sleep(0.1)  # Much shorter delay for actual gameplay
+        
         return best_move
 
-    # Training methods for DQN
-    def train_dqn(self, episodes=3000, save_interval=500):
-        """Train the DQN component"""
+    def get_fast_move(self) -> int:
+        """Get a quick move for training - uses shallow search or heuristics"""
+        valid_moves = self.board.get_valid_moves()
+        
+        # Check for immediate wins/losses first
+        for move in valid_moves:
+            self.board.set_move(move, self.player)
+            if self.board.check_win(self.player):
+                self.board.undo_move(move)
+                return move
+            self.board.undo_move(move)
+        
+        # Check for blocks
+        for move in valid_moves:
+            self.board.set_move(move, self.opponent)
+            if self.board.check_win(self.opponent):
+                self.board.undo_move(move)
+                return move
+            self.board.undo_move(move)
+        
+        # Use very shallow minimax (depth 1-2)
+        _, best_move = self.minimax(1, float("-inf"), float("inf"), True)
+        return best_move if best_move else random.choice(valid_moves)
+
+    # Optimized training methods for DQN
+    def train_dqn(self, episodes=2000, save_interval=200):
+        """Optimized DQN training"""
         if not self.use_dqn or self.dqn_agent is None:
             print("DQN not enabled!")
             return
         
+        self.is_training = True
         print(f"Training DQN for {episodes} episodes...")
         print(f"Training on device: {self.dqn_agent.device}")
+        
+        # Training phases with different strategies
+        exploration_phase = int(episodes * 0.4)  # 40% exploration
+        mixed_phase = int(episodes * 0.8)        # 80% mixed strategy
+        
         for episode in tqdm(range(episodes), desc="Training DQN"):
             self.board.reset()
             current_player = 1
             episode_states = []
             game_length = 0
+            max_game_length = 30  # Prevent very long games
             
-            while not self.board.is_terminal():
+            while not self.board.is_terminal() and game_length < max_game_length:
                 state = self.board_to_state()
                 valid_moves = self.board.get_valid_moves()
                 
-                # Choose move with exploration
-                if random.random() < self.dqn_agent.epsilon and episode < episodes * 0.8:
-                    move = random.choice(valid_moves)
+                # Dynamic strategy based on training phase
+                if episode < exploration_phase:
+                    # Heavy exploration phase - mostly random
+                    if random.random() < 0.8:
+                        move = random.choice(valid_moves)
+                    else:
+                        old_player = self.player
+                        self.player = current_player
+                        move = self.get_fast_move()  # Use fast move instead of full minimax
+                        self.player = old_player
+                elif episode < mixed_phase:
+                    # Mixed phase - balanced exploration/exploitation
+                    if random.random() < self.dqn_agent.epsilon:
+                        move = random.choice(valid_moves)
+                    else:
+                        old_player = self.player
+                        self.player = current_player
+                        move = self.get_fast_move()
+                        self.player = old_player
                 else:
-                    old_player = self.player
-                    self.player = current_player
-                    move = self.get_best_move()
-                    self.player = old_player
+                    # Exploitation phase - use trained model more
+                    if random.random() < max(0.1, self.dqn_agent.epsilon):
+                        move = random.choice(valid_moves)
+                    else:
+                        old_player = self.player
+                        self.player = current_player
+                        move = self.get_best_move(training_mode=True)
+                        self.player = old_player
                 
                 episode_states.append((current_player, state.copy()))
                 self.board.set_move(move, current_player)
                 current_player = 3 - current_player
                 game_length += 1
             
-            # Store experiences and train
+            # Store experiences with reward shaping
             final_result_p1 = self.board.get_game_result(1)
             final_result_p2 = self.board.get_game_result(2)
             
@@ -375,22 +465,29 @@ class MinimaxBot:
                 else:
                     reward = 1.0 if final_result_p2 == 1 else (-1.0 if final_result_p2 == -1 else 0.0)
                 
+                # Add small step penalty to encourage shorter games
+                reward -= 0.01 * (game_length / max_game_length)
+                
                 next_state = episode_states[i + 1][1] if i < len(episode_states) - 1 else state
                 done = i == len(episode_states) - 1
                 
                 self.dqn_agent.remember(state, reward, next_state, done)
             
-            if len(self.dqn_agent.memory) > 64:
-                self.dqn_agent.replay(batch_size=64)
+            # Train more frequently
+            if len(self.dqn_agent.memory) > 32:
+                self.dqn_agent.replay(batch_size=32)
             
-            if episode % 100 == 0:
+            # Update target network more frequently
+            if episode % 50 == 0:
                 self.dqn_agent.update_target_network()
             
+            # Save progress
             if episode % save_interval == 0 and episode > 0:
                 self.dqn_agent.save_model(self.model_path)
                 print(f"Episode {episode}: Epsilon={self.dqn_agent.epsilon:.4f}, "
-                      f"Memory={len(self.dqn_agent.memory)}")
+                      f"Memory={len(self.dqn_agent.memory)}, Avg game length: {game_length}")
         
+        self.is_training = False
         self.dqn_agent.save_model(self.model_path)
         print("Training completed!")
 

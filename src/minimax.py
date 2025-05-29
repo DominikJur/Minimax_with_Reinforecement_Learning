@@ -373,7 +373,7 @@ class MinimaxBot:
                 
                 if self.board.check_win(current_player):
                     self.board.undo_move(move)
-                    return None, move
+                    return 15000.0, move
                 
                 if self.board.check_lose(current_player):
                     self.board.undo_move(move)

@@ -338,9 +338,8 @@ class MinimaxBot:
         moves = self.board.get_valid_moves()
         best_move = None
 
-        # Opening book
         if self.board.is_empty():
-            return None, 33
+            return 5000, 33
         
         if maximizing:
             max_eval = float("-inf")
@@ -349,7 +348,7 @@ class MinimaxBot:
                 
                 if self.board.check_win(current_player):
                     self.board.undo_move(move)
-                    return None, move
+                    return 15000.0, move
                 
                 if self.board.check_lose(current_player):
                     self.board.undo_move(move)

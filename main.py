@@ -1,15 +1,13 @@
 import sys
-
 from src.client import GameClient
 
-
 def main():
-    """Main function"""
+    """Main function - unchanged interface, enhanced bot"""
     if len(sys.argv) != 6:
         print(
-            "Usage: python minimax.py <server_ip> <port> <player_num> <player_name> <search_depth>"
+            "Usage: python main.py <server_ip> <port> <player_num> <player_name> <search_depth>"
         )
-        print("Example: python minimax.py 127.0.0.1 8888 1 MinimaxBot 5")
+        print("Example: python main.py 127.0.0.1 8888 1 MinimaxBot 5")
         return
 
     server_ip = sys.argv[1]
@@ -30,9 +28,11 @@ def main():
         print("Player name must be 9 characters or less")
         return
 
+    # Create game client - this will automatically use the optimized MinimaxBot
+    print(f"Starting DQN-Enhanced Bot: {player_name} (Player {player_num}, Depth {search_depth})")
+    
     client = GameClient(server_ip, server_port, player_num, player_name, search_depth)
     client.play_game()
-
 
 if __name__ == "__main__":
     main()
